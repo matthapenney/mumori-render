@@ -6,3 +6,5 @@ Graphics renderer built in C++ & OpenGL
   - Cubemap rendering
   - Assimp model loading
   - imGUI integration
+  - gbuffer debug mode
+  - multiple runtime light support
