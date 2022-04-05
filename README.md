@@ -1,4 +1,4 @@
-# Mumori-Render
+# mumori-render
 Graphics renderer built in C++ & OpenGL
   - Deferred rendering + forward pass
     - Cook Torrance GGX PBR lighting
