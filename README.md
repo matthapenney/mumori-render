@@ -11,4 +11,4 @@ Graphics renderer built in C++ & OpenGL
 
 ![](pbr-gif-simple.gif)
 
-![](textured_deffered_debug)
+![](textured_deffered_debug.gif)
