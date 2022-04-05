@@ -1,0 +1,279 @@
+#shader vertex
+#version 430 core
+
+layout(location = 0) in vec3 aPosition;
+layout(location = 1) in vec2 aTexCoords;
+
+
+out vec2 v_TexCoord;
+
+
+void main()
+{
+	v_TexCoord = aTexCoords;
+	gl_Position =  vec4(aPosition, 1.0f);
+}
+
+#shader fragment
+#version 460 core
+
+out vec4 fragColor;
+
+in vec2 v_TexCoord;
+
+uniform sampler2D gPosition;
+uniform sampler2D gNormal;
+uniform sampler2D gAlbedoSpec;
+uniform sampler2D gBrightColor;
+uniform sampler2D gMetallic;
+uniform sampler2D gRoughness;
+uniform sampler2D gAO;
+
+
+// Environment Map Irradiance 
+uniform samplerCube irradianceMap;
+
+struct AreaLight
+{
+	vec3 v0;
+	vec3 v1;
+	vec3 v2;
+	vec3 v3;
+};
+
+struct Light 
+{
+	vec3 lightPosition;
+	vec3 lightColor;
+	
+	float Quadratic;
+	float Linear;
+	float Radius;
+};
+
+
+uniform Light light;
+uniform vec3 worldNormal;
+
+// Material Properties
+uniform float roughnessVal;
+uniform float metalnessVal;
+uniform float aoVal;
+uniform vec3 albedoVal;
+
+uniform float intensity;
+uniform vec3 viewPosition;
+uniform vec3 lightAmbient;
+
+float near = 0.1f;
+float far  = 100.0f;
+
+vec3 getNormalFromMap()
+{
+    vec3 tangentNormal = texture(gNormal, v_TexCoord).xyz * 2.0 - 1.0;
+
+	vec3 worldPos = texture(gPosition, v_TexCoord).xyz;
+    vec3 Q1  = dFdx(worldPos);
+    vec3 Q2  = dFdy(worldPos);
+    vec2 st1 = dFdx(v_TexCoord);
+    vec2 st2 = dFdy(v_TexCoord);
+
+    vec3 N   = normalize(worldNormal);
+    vec3 T  = normalize(Q1*st2.t - Q2*st1.t);
+    vec3 B  = -normalize(cross(N, T));
+    mat3 TBN = mat3(T, B, N);
+
+    return normalize(TBN * tangentNormal);
+}
+
+
+float NormalDistributionFunction(vec3 N, vec3 H, float alpha)
+{
+	float a = alpha * alpha;
+	float alphasquared = a * a;
+	float costheta = max(dot(N, H), 0.0f);
+	float costhetasquared = costheta * costheta;
+
+	float denom = (costhetasquared * (alphasquared - 1.0f) + 1.0f);
+	denom = 3.14159265 * (denom * denom);
+
+	return alphasquared / denom;
+};
+
+float GeometrySchlickGGX(float NdotI, float k)
+{
+	float numerator = NdotI;
+	float denom = NdotI * (1.0f - k) + k;
+
+	return numerator / denom;
+
+};
+
+float GeometrySmith(vec3 N, vec3 View, vec3 Light, float k)
+{
+	float NdotV = max(dot(N, View), 0.0f);
+	float NdotL = max(dot(N, Light), 0.0f);
+	float ggxV = GeometrySchlickGGX(NdotV, k);
+	float ggxL = GeometrySchlickGGX(NdotL, k);
+	
+	return ggxV * ggxL;
+
+};
+
+vec3 FresnelSchlick(float costheta, vec3 F0)
+{
+	return F0 + (1.0f-F0) * pow(clamp(1.0f-costheta, 0.0f, 1.0f), 5.0f);
+};
+
+float calculateKDirect(float alpha)
+{
+	float numerator = (alpha + 1.0f) * (alpha + 1.0f);
+	float denom = 8.0f;
+	return numerator / denom;
+};
+
+float calculateKIBL(float alpha)
+{
+	float numerator = alpha * alpha;
+	float denom = 2.0f;
+	return numerator / denom;
+
+};
+
+
+vec3 uncharted2_tonemap_partial(vec3 x)
+{
+    float A = 0.15f;
+    float B = 0.50f;
+    float C = 0.10f;
+    float D = 0.20f;
+    float E = 0.02f;
+    float F = 0.30f;
+    return ((x * (A * x + C * B) + D * E) / (x * (A * x + B) + D * F)) - E / F;
+}
+
+vec3 uncharted2_filmic(vec3 v)
+{
+    float exposure_bias = 2.0f;
+    vec3 curr = uncharted2_tonemap_partial(v * exposure_bias);
+
+    vec3 W = vec3(11.2f,11.2f,11.2f);
+
+    vec3 white_scale = vec3(1.0f,1.0f,1.0f) / uncharted2_tonemap_partial(W);
+    return curr * white_scale;
+}
+
+
+// AREA LIGHT
+
+float EdgeIntegral(vec3 v1, vec3 v2, vec3 N)
+{
+	float theta = acos(dot(v1, v2));
+	vec3 u = normalize(cross(v1,v2));
+	return theta * dot(u, N);
+};
+
+float PolyIntegral(vec3 V[4], vec3 N)
+{
+	float sum = 0.0f;
+	sum += EdgeIntegral(V[0], V[1], N);
+	sum += EdgeIntegral(V[1], V[2], N);
+	sum += EdgeIntegral(V[2], V[3], N);
+	sum += EdgeIntegral(V[3], V[0], N);
+
+	return sum;
+};
+
+// vec3 CalculatelTC();
+
+void main()
+{
+
+	// CONSTANTS ------------------------------------------------------------------------------
+	const float kPi = 3.14159265;
+	const float kShininess = 16.0;
+	const float kEnergyConservation = ( 8.0 + kShininess ) / ( 8.0 * kPi ); 
+	const float gamma = 2.2f;
+
+
+	// Get GBuffer Data ------------------------------------------------------------------------------
+
+	vec3 FragPosition = texture(gPosition, v_TexCoord).rgb;
+	vec3 normal = getNormalFromMap();
+	vec3 basecolor = pow(texture(gAlbedoSpec, v_TexCoord).rgb, vec3(2.2f));
+	vec3 albedo = basecolor;
+	float metallicMap = texture(gMetallic, v_TexCoord).r;
+	float roughnessMap = texture(gRoughness, v_TexCoord).r;
+	float AOMap = texture(gAO, v_TexCoord).r;
+
+	// Multipliers ------------------------------------------------------------------------------
+	float roughness = roughnessMap * roughnessVal;
+	float metalness = metallicMap * metalnessVal;
+	float ao = AOMap * aoVal;
+
+	// lightDir -> omega_i , viewDir -> omega_o, normal -> N
+	vec3 lightDir = normalize(light.lightPosition - FragPosition);
+	vec3 viewDir = normalize(viewPosition - FragPosition);
+	vec3 halfwayDir = normalize(lightDir + viewDir);
+
+
+
+	// Attenuation ------------------------------------------------------------------------------
+    float distance = length(light.lightPosition - FragPosition);
+	float attenuation = 1.0f / (distance * distance);
+
+	// ambient -----------
+	vec3 color = light.lightColor;
+	vec3 ambient = lightAmbient * albedo * ao;
+
+	float costheta =  max(dot(normal, lightDir), 0.0f);
+
+	// If sun no attenuation?
+	vec3 radiance = color * intensity * attenuation;
+	//vec3 radiance = color * intensity;
+
+
+
+	// Lambertian Diffuse
+	const vec3 fLambert = albedo / kPi;
+
+	vec3 F0 = vec3(0.04);
+	F0 = mix(F0, albedo, metalness);
+
+
+	// spec --------------
+	// (  Physically Based Rendering w/ Reflectance Equation )
+	vec3 Lo = vec3(0.0f);
+	float k = calculateKDirect(roughness);
+
+	// D F G 
+	float D  = NormalDistributionFunction(normal, halfwayDir, roughness);
+	vec3 F = FresnelSchlick(costheta, F0);
+	float G = GeometrySmith(normal, viewDir, lightDir, k);
+	vec3 DFG = D * F * G;
+
+	vec3 specular = DFG / (4.0f * max(dot(normal, viewDir), 0.0f) * max(dot(normal, lightDir), 0.0f) + 0.0001f);
+	vec3 kS = F;
+	vec3 kD = vec3(1.0f) - F;
+	kD *= 1.0f - metalness;
+
+
+	Lo += ((kD * fLambert) + specular) * radiance * costheta;
+
+	vec3 irradiance = texture(irradianceMap, texture(gNormal, v_TexCoord).xyz).rgb;
+	irradiance = uncharted2_filmic(irradiance);
+	irradiance = pow(irradiance, vec3(1.0/gamma));
+	
+	vec3 ibldiffuse = irradiance * albedo;
+	vec3 newAmbient = (kD * ibldiffuse) * ao;
+
+	fragColor.rgb = ambient + Lo;
+
+	
+	// HDR tonemapping + gamma corect -------------------------------------------	
+	vec3 m = uncharted2_filmic(fragColor.rgb);
+	m = pow(m, vec3(1.0/gamma));
+	fragColor = vec4(m, 1.0f);
+	//fragColor = vec4(irradiance, 1.0f);	
+	
+}

@@ -1,0 +1,31 @@
+#shader vertex
+#version 430 core
+
+layout(location = 0) in vec3 aPosition;
+layout(location = 1) in vec2 aTexCoords;
+
+out vec2 v_TexCoord;
+
+void main()
+{
+	v_TexCoord = aTexCoords;
+	gl_Position =  vec4(aPosition.x, aPosition.y, 0.0f, 1.0f);
+}
+
+#shader fragment
+#version 460 core
+
+layout(location = 0) out vec4 fragColor;
+
+in vec2 v_TexCoord;
+uniform sampler2D screenTexture;
+
+
+void main()
+{
+
+	vec3 col = texture(screenTexture, v_TexCoord).rgb;
+	fragColor = vec4(col, 1.0f);
+
+
+}

@@ -1,0 +1,90 @@
+#shader vertex
+#version 430 core
+
+layout(location = 0) in vec3 aPosition;
+
+
+uniform mat4 model;
+uniform mat4 u_Pv;
+void main()
+{
+	gl_Position =  u_Pv* model * vec4(aPosition.x, aPosition.y, aPosition.z, 1.0f);
+}
+
+#shader fragment
+#version 460 core
+
+layout(location = 0) out vec4 fragColor;
+
+uniform vec3 u_lightColor;
+uniform float _Exposure;
+
+vec3 luminance(vec3 v)
+{
+    return dot(v, vec3(0.2126f, 0.7152f, 0.0722f));
+}
+            
+vec3 scale_luminance(vec3 c_in, float l_out)
+{
+    // C_out = C_in * (L_out / L_in)
+    float l_in = luminance(c_in);
+    return c_in * (l_out / l_in);
+}
+
+vec3 exposure_tonemap(vec3 h)
+{
+    return vec3(1.0, 1.0, 1.0) - exp(-h * _Exposure);    
+}
+
+vec3 uncharted2_tonemap_partial(vec3 x)
+{
+    float A = 0.15f;
+    float B = 0.50f;
+    float C = 0.10f;
+    float D = 0.20f;
+    float E = 0.02f;
+    float F = 0.30f;
+    return ((x * (A * x + C * B) + D * E) / (x * (A * x + B) + D * F)) - E / F;
+}
+
+vec3 uncharted2_filmic(vec3 v)
+{
+    float exposure_bias = 2.0f;
+    vec3 curr = uncharted2_tonemap_partial(v * exposure_bias);
+
+    vec3 W = vec3(11.2f,11.2f,11.2f);
+    vec3 white_scale = vec3(1.0f,1.0f,1.0f) / uncharted2_tonemap_partial(W);
+    return curr * white_scale;
+}
+
+float rand(float2 co)
+{
+    return frac(sin(dot(co.xy, vec2(12.9898, 78.233))) * 43758.5453);
+}
+
+
+
+void main()
+{
+    const float gamma = 2.2f;
+                
+    vec4 col = 0;
+                
+    vec3 hdrcol = tex2D(_MainTex, i.uv).rgb;
+                
+    // Reinhard tone mapping
+    //vec3 m = hdrcol / (hdrcol + vec3(1.0,1.0,1.0));
+
+    // Exposure tone mapping
+    //vec3 m = exposure_tonemap(hdrcol);
+
+    //Uncharted partial 
+    //vec3 m = uncharted2_tonemap_partial(hdrcol);
+                
+    vec3 m = uncharted2_filmic(hdrcol);
+    
+    // Gamma correction
+    m = pow(m, vec3(1.0 / gamma));
+                
+    fragColor = vec4(m, 1.0);
+}

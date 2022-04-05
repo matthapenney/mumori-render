@@ -1,0 +1,45 @@
+#shader vertex
+#version 430 core
+
+layout(location = 0) in vec3 aPosition;
+
+uniform mat4 model;
+uniform mat4 view;
+uniform mat4 projection;
+
+out vec3 localPosition;
+
+void main()
+{
+	localPosition = aPosition;
+	gl_Position =  projection * view *  model * vec4(aPosition, 1.0f);
+}
+
+#shader fragment
+#version 460 core
+
+out vec4 fragColor;
+in vec3 localPosition;
+
+uniform sampler2D equirectangularMap;
+
+const vec2 invAtan = vec2(0.1591, 0.3183);
+
+vec2 SampleSphericalMap(vec3 v)
+{
+    vec2 uv = vec2(atan(v.z, v.x), asin(v.y));
+    uv *= invAtan;
+    uv += 0.5;
+    return uv;
+}
+
+void main()
+{
+    float gamma = 2.2f;
+
+	vec2 uv = SampleSphericalMap(normalize(localPosition)); // make sure to normalize localPosition
+    vec3 color = texture(equirectangularMap, uv).rgb;
+	
+	fragColor = vec4(color, 1.0f);
+	
+}	

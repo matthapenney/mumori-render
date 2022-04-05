@@ -1,0 +1,145 @@
+#shader vertex
+#version 430 core
+
+layout(location = 0) in vec3 aPosition;
+layout(location = 1) in vec2 aTexCoords;
+
+out vec2 v_TexCoord;
+
+void main()
+{
+	v_TexCoord = aTexCoords;
+	gl_Position =  vec4(aPosition.x, aPosition.y, aPosition.z, 1.0f);
+}
+
+#shader fragment
+#version 460 core
+
+out vec4 fragColor;
+
+in vec2 v_TexCoord;
+
+uniform sampler2D m_gPosition;
+uniform sampler2D m_gNormal;
+uniform sampler2D m_gAlbedoSpec;
+//uniform sampler2D depthMap;
+
+
+struct Light {
+	vec3 lightPosition;
+	vec3 lightColor;
+	float quadratic;
+	float linear;
+};
+
+uniform Light light;
+
+
+uniform vec3 viewPosition;
+uniform vec3 lightAmbient;
+
+float near = 0.1f;
+float far  = 100.0f;
+
+float LinearizeDepth(float depth)
+{
+	float z = depth * 2.0f - 1.0f;
+	return(2.0f*near*far) / (far + near - z * (far - near));
+}
+
+vec3 uncharted2_tonemap_partial(vec3 x)
+{
+    float A = 0.15f;
+    float B = 0.50f;
+    float C = 0.10f;
+    float D = 0.20f;
+    float E = 0.02f;
+    float F = 0.30f;
+    return ((x * (A * x + C * B) + D * E) / (x * (A * x + B) + D * F)) - E / F;
+}
+
+vec3 uncharted2_filmic(vec3 v)
+{
+    float exposure_bias = 2.0f;
+    vec3 curr = uncharted2_tonemap_partial(v * exposure_bias);
+
+    vec3 W = vec3(11.2f,11.2f,11.2f);
+
+    vec3 white_scale = vec3(1.0f,1.0f,1.0f) / uncharted2_tonemap_partial(W);
+    return curr * white_scale;
+}
+
+
+void main()
+{
+
+	// Get GBuffer Data --------------------------
+
+	vec3 FragPosition = texture(m_gPosition, v_TexCoord).rgb;
+	vec3 Normal = texture(m_gNormal, v_TexCoord).rgb;
+	vec3 Diffuse = texture(m_gAlbedoSpec, v_TexCoord).rgb;
+	//vec3 Diffuse = vec3(0.8f, 0.8f, 0.8f);
+	float Specular = texture(m_gAlbedoSpec, v_TexCoord).a;
+
+
+	vec3 lightDir = normalize(light.lightPosition - FragPosition);
+	vec3 viewDir = normalize(viewPosition - FragPosition);
+	vec3 normal = normalize(Normal);
+
+
+	const float kPi = 3.14159265;
+	const float kShininess = 16.0;
+	
+	
+	// For normal map
+	//vec3 normal =  texture(normalMap, v_TexCoord).rgb;
+	//normal = normalize(normal *  2.0f -1.0f);
+
+
+	// Visualize depth
+	 //float depthValue = texture(depthMap, v_TexCoord).r;
+	//float depth = LinearizeDepth(depthMap.z) / far;
+
+
+	// ambient -----------
+	vec3 color = light.lightColor * Diffuse;
+	vec3 ambient = lightAmbient * color;
+
+	// diffuse -----------
+	float d =  max(dot(lightDir, normal), 0.0f);
+	vec3 diffuse = d * color;
+
+
+
+	// spec --------------
+	// (  Blinn Phong )
+
+	const float kEnergyConservation = ( 8.0 + kShininess ) / ( 8.0 * kPi ); 
+	vec3 halfwayDir = normalize(lightDir + viewDir);
+	float spec = kEnergyConservation * pow(max(dot(normal, halfwayDir), 0.0f), kShininess);
+
+	vec3 specular = vec3(0.3f) * spec;
+	
+	float gamma = 2.2f;
+	
+	// Attenuation
+    float distance = length(light.lightPosition - FragPosition);
+	float attenuation = 1.0f / (1.0f + light.linear * distance + light.quadratic * distance * distance);
+
+	diffuse *= attenuation;
+    specular *= attenuation;
+
+
+	fragColor.rgb = (ambient + diffuse + specular);
+	
+	// HDR tonemapping + gamma corect	
+	vec3 m = uncharted2_filmic(fragColor.rgb);
+	
+	m = pow(fragColor.rgb, vec3(1.0/gamma));
+
+
+	fragColor = vec4(m, 1.0f);
+	//fragColor = vec4(vec3(depthValue, 1.0f));
+
+
+}

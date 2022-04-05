@@ -1,0 +1,40 @@
+#shader vertex
+#version 430 core
+
+layout(location = 0) in vec3 aPosition;
+
+
+uniform mat4 model;
+uniform mat4 u_Pv;
+void main()
+{
+	gl_Position =  u_Pv* model * vec4(aPosition.x, aPosition.y, aPosition.z, 1.0f);
+}
+
+#shader fragment
+#version 460 core
+
+layout(location = 0) out vec4 fragColor;
+layout(location = 1) out vec4 fullscreen;
+
+uniform vec3 lightColor;
+
+
+void main()
+{
+	//fragColor = vec4(0.04f, 0.28f, 0.26f, 1.0f);
+	
+	fragColor = vec4(lightColor, 1.0f);
+	fullscreen = vec4(lightColor, 1.0f);
+	
+	float brightness = dot(fullscreen.rgb, vec3(0.2126, 0.7152, 0.0722));
+	if (brightness > 1.0f)
+	{
+		fullscreen = vec4(fullscreen.rgb, 1.0);
+	}
+	else
+	{
+		fullscreen = vec4(0.0f, 0.0f, 0.0f, 1.0f);
+	}
+
+}	

@@ -1,0 +1,251 @@
+#shader vertex
+#version 430 core
+
+layout(location = 0) in vec2 aPosition;
+layout(location = 1) in vec2 aTexCoords;
+
+out vec2 v_TexCoord;
+
+void main()
+{
+	v_TexCoord = aTexCoords;
+	gl_Position =  vec4(aPosition.x, aPosition.y, 0.0f, 1.0f);
+}
+
+#shader fragment
+#version 460 core
+
+layout(location = 0) out vec4 fragColor;
+layout(location = 1) out vec4 brightColor;
+
+in vec2 v_TexCoord;
+uniform sampler2D screenTexture;
+
+uniform _Threshold = 1.0f;
+uniform _SoftThreshold = 0.5f;
+
+{
+
+    // Extract light prefilter step
+
+vec3 Prefilter(vec3 c)
+{
+    float brightness = max(c.r, max(c.g, c.b));
+    float knee = _Threshold * _SoftThreshold;
+    float soft = brightness - _Threshold + knee;
+    soft = clamp(soft, 0, 2 * knee);
+    soft = soft * soft / (4 * knee + .00001f);
+    float contrib = max(0, brightness - _Threshold);
+    contrib = contrib/(max(brightness, 0.00001));
+    return c * contrib;
+}
+              
+
+            v2f vert(appdata v)
+            {
+                v2f o;
+                o.vertex = UnityObjectToClipPos(v.vertex);
+                o.uv = v.uv;
+                return o;
+            }
+
+
+            fixed4 frag(v2f i) : SV_Target
+            {
+                float4 col = 0;
+                float3 sam = tex2D(_MainTex,i.uv).rgb;
+                
+                // Method taken from https://learnopengl.com/Advanced-Lighting/Bloom
+                /*float bright = dot(sam, float3(0.2126f, 0.7152f, 0.0722f));
+                if (bright > _Threshold)
+                {
+                    col = float4(sam, 1.0f);
+                }
+                else
+                    col = float4(0.0f, 0.0f, 0.0f, 1.0f);
+                */
+
+                // Use color's maximum component to determine brightness
+                col = float4(Prefilter(sam), 1);
+                return col;
+            }
+
+        //Horizontal Blur
+        Pass
+        { 
+
+            CGPROGRAM
+            #pragma vertex vert
+            #pragma fragment frag
+
+            #define PI 3.14159265359
+            #define E 2.71828182846
+
+            #define StandardDeviation 0.02
+            #define SAMPLES 128
+
+            #include "UnityCG.cginc"
+
+            struct appdata
+            {
+                float4 vertex : POSITION;
+                float2 uv : TEXCOORD0;
+            };
+
+            struct v2f
+            {
+                float2 uv : TEXCOORD0;
+                float4 vertex : SV_POSITION;
+            };
+
+            v2f vert (appdata v)
+            {
+                v2f o;
+                o.vertex = UnityObjectToClipPos(v.vertex);
+                o.uv = v.uv;
+                return o;
+            }
+
+            fixed4 frag(v2f i) : SV_Target
+            {
+                float invAspect = _ScreenParams.y / _ScreenParams.x;
+                vec3 col = 0;
+               
+                float sum_gauss = 0;
+
+
+                for (float index = 0; index < SAMPLES; index++)
+                {
+                    //do gaussian blur horiz
+                    float offset = (index / (SAMPLES - 1) - 0.5) * 0.3;
+                    vec2 uv = i.uv + vec2(offset, 0);
+
+                    float stdDeviation_Squared = StandardDeviation * StandardDeviation;
+                    float gauss = (1 / sqrt(2 * PI * stdDeviation_Squared)) * pow(E, -((offset * offset) / (2 * stdDeviation_Squared)));
+
+                    sum_gauss += gauss;
+                    vec3 col += texture(screenTexture, v_TexCoord).rgb * gauss;
+                    //col += tex2D(_MainTex, uv) * gauss;
+                }   
+                
+                
+                vec4 col = vec4(col, 1.0f)/sum_gauss;
+                return col;
+            }
+         // Vertical Blur
+         Pass
+        {
+               
+            CGPROGRAM
+            #pragma vertex vert
+            #pragma fragment frag
+
+            #define PI 3.14159265359
+            #define E 2.71828182846
+
+            #define StandardDeviation 0.02
+            #define SAMPLES 128
+
+            #include "UnityCG.cginc"
+
+            struct appdata
+            {
+                float4 vertex : POSITION;
+                float2 uv : TEXCOORD0;
+            };
+
+            struct v2f
+            {
+                float2 uv : TEXCOORD0;
+                float4 vertex : SV_POSITION;
+            };
+
+            v2f vert(appdata v)
+            {
+                v2f o;
+                o.vertex = UnityObjectToClipPos(v.vertex);
+                o.uv = v.uv;
+                return o;
+            }
+
+            sampler2D _MainTex;
+
+            fixed4 frag(v2f i) : SV_Target
+            {
+                float invAspect = _ScreenParams.y / _ScreenParams.x;
+                float4 col = 0;
+
+                float sum_gauss = 0;
+
+
+                for (float index = 0; index < SAMPLES; index++)
+                {
+                    //do gaussian blur vertcial
+                    float offset = (index / (SAMPLES - 1) - 0.5) * 0.3* invAspect;
+                    float2 uv = i.uv + float2(0, offset);
+
+                    float stdDeviation_Squared = StandardDeviation * StandardDeviation;
+                    float gauss = (1 / sqrt(2 * PI * stdDeviation_Squared)) * pow(E, -((offset * offset) / (2 * stdDeviation_Squared)));
+
+                    sum_gauss += gauss;
+                    col += tex2D(_MainTex, uv) * gauss;
+                }
+
+
+                col = col / sum_gauss;
+                return col;
+            }
+            ENDCG
+        }
+             Pass
+            {
+                Blend One One
+                CGPROGRAM
+                #pragma vertex vert
+                #pragma fragment frag
+
+                #include "UnityCG.cginc"
+
+                sampler2D _MainTex;
+                float _Threshold;
+
+                struct appdata
+                {
+                    float4 vertex : POSITION;
+                    float2 uv : TEXCOORD0;
+                };
+
+                struct v2f
+                {
+                    float2 uv : TEXCOORD0;
+                    float4 vertex : SV_POSITION;
+                };
+
+                float3 Sample(float2 uv)
+                {
+                    return tex2D(_MainTex, uv).rgb;
+                }
+
+
+                v2f vert(appdata v)
+                {
+                    v2f o;
+                    o.vertex = UnityObjectToClipPos(v.vertex);
+                    o.uv = v.uv;
+                    return o;
+                }
+
+
+                fixed4 frag(v2f i) : SV_Target
+                {
+                    float4 col = 0;
+
+                    //Do nothing in shader
+                    col = tex2D(_MainTex, i.uv);
+                    return col;
+
+                }
+                ENDCG
+            }
+    }
+}

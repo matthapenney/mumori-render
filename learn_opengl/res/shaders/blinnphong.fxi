@@ -1,0 +1,102 @@
+#shader vertex
+#version 430 core
+
+layout(location = 0) in vec3 aPosition;
+layout(location = 1) in vec2 texCoord;
+layout(location = 2) in vec3 aNormal;
+
+out vec3 v_FragPosition;
+out vec2 v_TexCoord;
+out vec3 v_Normal;
+
+uniform mat4 model;
+uniform mat4 u_Pv;
+
+void main()
+{
+	v_FragPosition = aPosition;
+	v_Normal = aNormal;
+	gl_Position =  u_Pv* model * vec4(aPosition.x, aPosition.y, aPosition.z, 1.0f);
+	v_TexCoord = texCoord;
+}
+
+#shader fragment
+#version 460 core
+
+layout(location = 0) out vec4 fragColor;
+
+in vec3 v_FragPosition;
+in vec2 v_TexCoord;
+in vec3 v_Normal;
+
+uniform vec3 lightPosition;
+uniform vec3 lightColor;
+uniform vec3 viewPosition;
+uniform sampler2D texture1;
+//uniform sampler2D normalMap;
+
+float near = 0.1f;
+float far  = 100.0f;
+
+float LinearizeDepth(float depth)
+{
+	float z = depth * 2.0f - 1.0f;
+	return(2.0f*near*far) / (far + near - z * (far - near));
+}
+
+void main()
+{
+
+	vec3 lightDir = normalize(lightPosition - v_FragPosition);
+	vec3 viewDir = normalize(viewPosition - v_FragPosition);
+	vec3 normal = normalize(v_Normal);
+
+
+	const float kPi = 3.14159265;
+	const float kShininess = 16.0;
+	
+	
+	// For normal map
+	//vec3 normal =  texture(normalMap, v_TexCoord).rgb;
+	//normal = normalize(normal *  2.0f -1.0f);
+
+
+	// Visualize depth
+	float depth = LinearizeDepth(gl_FragCoord.z) / far;
+
+	// ambient -----------
+	vec3 color = lightColor * (texture(texture1, v_TexCoord).rgb);
+	vec3 ambient = 1.0f * color;
+
+	// diffuse -----------
+	float d =  max(dot(lightDir, normal), 0.0f);
+	vec3 diffuse = d * color;
+
+
+
+	// spec --------------
+	// (  Blinn Phong )
+
+	const float kEnergyConservation = ( 8.0 + kShininess ) / ( 8.0 * kPi ); 
+	vec3 halfwayDir = normalize(lightDir + viewDir);
+	float spec = kEnergyConservation * pow(max(dot(normal, halfwayDir), 0.0f), kShininess);
+
+	vec3 specular = vec3(0.3f) * spec;
+	
+	float gamma = 2.2f;
+	// Simple Attenuation
+	float max_distance = 1.5f;
+    float distance = length(lightPosition - v_FragPosition);
+	float attenuation = pow(1.0 / (distance* distance), gamma);
+
+	diffuse *= attenuation;
+    specular *= attenuation;
+
+
+	fragColor.rgb = (ambient + diffuse + specular);
+    fragColor.rgb = pow(fragColor.rgb, vec3(1.0/gamma));
+
+	//fragColor = vec4((lightColor* 0.1f), 1.0f) * (texture(texture1, v_TexCoord));
+	
+	fragColor = vec4(fragColor.rgb, 1.0f);
+}

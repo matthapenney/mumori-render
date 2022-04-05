@@ -1,0 +1,37 @@
+#shader vertex
+#version 430 core
+
+layout(location = 0) in vec2 aPosition;
+layout(location = 1) in vec2 aTexCoords;
+
+out vec2 v_TexCoord;
+
+void main()
+{
+	v_TexCoord = aTexCoords;
+	gl_Position =  vec4(aPosition.x, aPosition.y, 0.0f, 1.0f);
+}
+
+#shader fragment
+#version 460 core
+
+layout(location = 0) out vec4 fragColor;
+
+in vec2 v_TexCoord;
+uniform sampler2D screenTexture;
+
+void main()
+{
+	const float gamma = 2.2f;
+
+	vec3 hdrCol = texture(screenTexture, v_TexCoord).rgb;
+
+	// Greyscale (weighted by human eye sensitivty)
+	//float average = (0.2126 * hdrCol.r + 0.7152 * hdrCol.g + 0.0722 * hdrCol.b ) / 3.0f;
+	//fragColor = vec4(vec3(average, average, average), 1.0f);
+
+	// Gamma correction
+    //hdrCol = pow(hdrCol, vec3(1.0 / gamma, 1.0 / gamma, 1.0 / gamma));
+	
+	fragColor = vec4(hdrCol, 1.0f);
+}

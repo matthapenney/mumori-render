@@ -1,0 +1,107 @@
+#shader vertex
+#version 430 core
+
+layout(location = 0) in vec3 aPosition;
+
+
+uniform mat4 model;
+uniform mat4 view;
+uniform mat4 projection;
+
+out vec3 localPosition;
+out vec4 pos;
+
+void main()
+{
+    localPosition = aPosition;
+	mat4 rotView = mat4(mat3(view));
+	vec4 pos = -projection * rotView * vec4(aPosition.x, aPosition.y, aPosition.z, 1.0f);
+	gl_Position = pos.xyww;
+}
+
+#shader fragment
+#version 460 core
+
+layout(location = 0) out vec4 fragColor;
+
+in vec3 localPosition;
+in vec4 pos;
+
+uniform samplerCube environmentMap;
+uniform vec3 sunColor;
+uniform vec3 lightPosition;
+uniform vec3 viewPosition;
+uniform float g;
+
+const float kPi = 3.14159265;
+
+float jankCornetteShanks(float fCos, float fCos2, float g)
+{
+    float g2 = g * g;
+    float coeff1 = 3 / 8 * kPi;
+    float coeff2 = (1 + g2 - 2*g* fCos);
+    float num = (1-g2) * (1 + fCos2);
+    float denom = (2+g2) * (pow(coeff2, 1.5));
+    
+    return num / denom;
+    
+}
+vec3 exposure_tonemap(vec3 h)
+{
+    return vec3(1.0, 1.0, 1.0) - exp(-h * 1.0f);    
+}
+
+vec3 uncharted2_tonemap_partial(vec3 x)
+{
+    float A = 0.15f;
+    float B = 0.50f;
+    float C = 0.10f;
+    float D = 0.20f;
+    float E = 0.02f;
+    float F = 0.30f;
+    return ((x * (A * x + C * B) + D * E) / (x * (A * x + B) + D * F)) - E / F;
+}
+
+vec3 uncharted2_filmic(vec3 v)
+{
+    float exposure_bias = 2.0f;
+    vec3 curr = uncharted2_tonemap_partial(v * exposure_bias);
+
+    vec3 W = vec3(11.2f,11.2f,11.2f);
+
+    vec3 white_scale = vec3(1.0f,1.0f,1.0f) / uncharted2_tonemap_partial(W);
+    return curr * white_scale;
+}
+
+void main()
+{
+
+    vec3 hdrColor = texture(environmentMap, localPosition).rgb;
+
+
+    vec3 lightDirection = normalize(lightPosition - viewPosition);
+    vec3 viewDirection = normalize(vec3(pos) - viewPosition);
+    vec3 lightParticle = normalize(lightPosition - vec3(pos));
+
+    float fCos = dot(lightDirection, lightParticle) / length(lightParticle);
+    float fCos2 = fCos * fCos;
+
+    float num = 3.0f * (1 + fCos2);
+    float denom = 16.0f * kPi;
+    
+    float CS = jankCornetteShanks(fCos, fCos2, g);
+    float raileighTest = num/denom; 
+
+
+
+    float gamma = 2.2f;
+
+
+    hdrColor *=  sunColor * CS * raileighTest;
+
+	// HDR tonemapping + gamma corect	
+	vec3 m = uncharted2_filmic(hdrColor);
+	m = pow(m, vec3(1.0/gamma));
+	fragColor = vec4(m, 1.0f);
+	
+}	
